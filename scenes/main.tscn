@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://b87e24jjd15qg"]
+
+[ext_resource type="Script" uid="uid://lo5re33h5cjt" path="res://scripts/Main.gd" id="1_0wfyh"]
+[ext_resource type="Script" uid="uid://ci2ckrkufw0hq" path="res://scripts/SocketClient.gd" id="2_sugp2"]
+
+[node name="Main" type="Node" unique_id=504490536]
+script = ExtResource("1_0wfyh")
+
+[node name="SocketClient" type="Node" parent="." unique_id=1011855349]
+script = ExtResource("2_sugp2")
