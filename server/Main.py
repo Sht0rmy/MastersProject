@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 
+from protocol import GenerateRequest, DungeonResponse, ok, error
+
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
 log = logging.getLogger(__name__)
 
@@ -15,27 +17,26 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
     try:
         while True:
-            # Читаємо довжину повідомлення (4 байти, big-endian)
             header = await reader.readexactly(4)
             msg_len = int.from_bytes(header, "big")
 
-            # Читаємо тіло повідомлення
             raw = await reader.readexactly(msg_len)
             request = json.loads(raw.decode("utf-8"))
             log.info(f"Отримано: {request}")
 
             response = await process_request(request)
 
-            # Відповідаємо з тим самим length-prefix протоколом
-            payload = json.dumps(response).encode("utf-8")
+            payload = json.dumps(response, ensure_ascii=False).encode("utf-8")
             writer.write(len(payload).to_bytes(4, "big") + payload)
             await writer.drain()
             log.info(f"Відповідь надіслана: {response}")
 
     except asyncio.IncompleteReadError:
         log.info(f"Godot відключився: {addr}")
+    except json.JSONDecodeError as e:
+        log.error(f"JSON помилка: {e}")
     except Exception as e:
-        log.error(f"Помилка: {e}")
+        log.error(f"Помилка: {e}", exc_info=True)
     finally:
         writer.close()
         await writer.wait_closed()
@@ -45,20 +46,21 @@ async def process_request(request: dict) -> dict:
     action = request.get("action")
 
     if action == "ping":
-        return {"status": "ok", "action": "pong"}
+        return ok("pong")
 
-    # Заглушки для майбутніх модулів
     if action == "generate":
-        return {
-            "status": "ok",
-            "action": "generate",
-            "rooms": [],
-            "npcs": [],
-            "loot": [],
-            "flavor": "",
-        }
+        req = GenerateRequest.from_dict(request)
+        return await handle_generate(req)
 
-    return {"status": "error", "message": f"Невідома дія: {action}"}
+    return error(f"Невідома дія: {action}")
+
+
+async def handle_generate(req: GenerateRequest) -> dict:
+    # Заглушка — повертає порожній данжен
+    # Буде замінено на реальний генератор у наступному кроці
+    response = DungeonResponse(seed=req.seed)
+    log.info(f"Generate запит: seed={req.seed}, size={req.size}")
+    return response.to_dict()
 
 
 async def main():

@@ -54,7 +54,6 @@ func _try_read() -> void:
 
 	_recv_buffer.append_array(_tcp.get_data(available)[1])
 
-	# Чекаємо мінімум 4 байти для header
 	while _recv_buffer.size() >= 4:
 		var msg_len := (
 			(_recv_buffer[0] << 24)
@@ -63,7 +62,6 @@ func _try_read() -> void:
 			| _recv_buffer[3]
 		)
 
-		# Якщо ще не отримали все тіло — чекаємо
 		if _recv_buffer.size() < 4 + msg_len:
 			break
 
@@ -99,6 +97,14 @@ func send_request(data: Dictionary) -> void:
 
 func ping() -> void:
 	send_request({"action": "ping"})
+
+
+func request_generate(seed: int = 42, size: int = 20) -> void:
+	send_request({
+		"action": "generate",
+		"seed": seed,
+		"size": size,
+	})
 
 
 func _schedule_reconnect() -> void:
