@@ -3,6 +3,7 @@ import json
 import logging
 
 from protocol import GenerateRequest, DungeonResponse, ok, error
+from dungeon import generate_bsp, build_corridors
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             payload = json.dumps(response, ensure_ascii=False).encode("utf-8")
             writer.write(len(payload).to_bytes(4, "big") + payload)
             await writer.drain()
-            log.info(f"Відповідь надіслана: {response}")
+            log.info(f"Відповідь: rooms={len(response.get('rooms', []))}, corridors={len(response.get('corridors', []))}")
 
     except asyncio.IncompleteReadError:
         log.info(f"Godot відключився: {addr}")
@@ -56,11 +57,24 @@ async def process_request(request: dict) -> dict:
 
 
 async def handle_generate(req: GenerateRequest) -> dict:
-    # Заглушка — повертає порожній данжен
-    # Буде замінено на реальний генератор у наступному кроці
-    response = DungeonResponse(seed=req.seed)
-    log.info(f"Generate запит: seed={req.seed}, size={req.size}")
-    return response.to_dict()
+    log.info(f"Генерація: seed={req.seed}, size={req.size}")
+
+    # 1. BSP — генеруємо кімнати
+    result = generate_bsp(size=req.size, seed=req.seed)
+
+    # 2. A* — будуємо коридори між парами кімнат
+    corridors = build_corridors(result.pairs, grid_w=req.size, grid_h=req.size)
+
+    # 3. Збираємо відповідь
+    response = DungeonResponse(
+        seed  = req.seed,
+        rooms = result.rooms,
+    )
+
+    data = response.to_dict()
+    data["corridors"] = corridors
+    data["action"] = "generate"
+    return data
 
 
 async def main():

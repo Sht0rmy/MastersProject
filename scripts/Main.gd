@@ -1,6 +1,7 @@
 extends Node
 
 @onready var socket: Node = $SocketClient
+@onready var dungeon_loader: Node2D = $DungeonLoader
 
 
 func _ready() -> void:
@@ -9,7 +10,7 @@ func _ready() -> void:
 
 
 func _on_connected() -> void:
-	print("Main: з'єднання встановлено, надсилаю ping...")
+	print("Main: підключено, надсилаю ping...")
 	socket.ping()
 
 
@@ -17,14 +18,15 @@ func _on_response(data: Dictionary) -> void:
 	var action: String = data.get("action", "")
 	var status: String = data.get("status", "")
 
-	print("Main: відповідь [%s] status=%s" % [action, status])
-
 	match action:
 		"pong":
-			print("  Pong отримано — зв'язок працює!")
+			print("Main: pong отримано — зв'язок працює! Натисни G для генерації.")
 
 		"generate":
-			_handle_dungeon(data)
+			if status == "ok":
+				_handle_dungeon(data)
+			else:
+				push_error("Main: помилка генерації — " + data.get("message", ""))
 
 		_:
 			push_warning("Main: невідома відповідь: %s" % str(data))
@@ -33,14 +35,13 @@ func _on_response(data: Dictionary) -> void:
 func _handle_dungeon(data: Dictionary) -> void:
 	var rooms: Array = data.get("rooms", [])
 	var corridors: Array = data.get("corridors", [])
-	var npcs: Array = data.get("npcs", [])
-	var loot: Array = data.get("loot", [])
-	var seed: int = data.get("seed", 0)
+	var dungeon_seed: int = data.get("seed", 0)
 
-	print("  Данжен отримано: seed=%d, rooms=%d, corridors=%d, npcs=%d, loot=%d" % [
-		seed, rooms.size(), corridors.size(), npcs.size(), loot.size()
+	print("Main: данжен отримано — seed=%d, rooms=%d, corridors=%d" % [
+		dungeon_seed, rooms.size(), corridors.size()
 	])
-	# TODO: передати дані в DungeonLoader → TileMap
+
+	dungeon_loader.render_dungeon(data)
 
 
 func _input(event: InputEvent) -> void:
@@ -49,7 +50,6 @@ func _input(event: InputEvent) -> void:
 			KEY_P:
 				socket.ping()
 			KEY_G:
-				# G — згенерувати данжен з випадковим seed
-				var seed := randi()
-				print("Main: запит на генерацію, seed=%d" % seed)
-				socket.request_generate(seed, 20)
+				var dungeon_seed := randi()
+				print("Main: генерація, seed=%d" % dungeon_seed)
+				socket.request_generate(dungeon_seed, 40)
