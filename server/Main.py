@@ -1,9 +1,12 @@
 import asyncio
 import json
 import logging
+import random
 
 from protocol import GenerateRequest, DungeonResponse, ok, error
 from dungeon import generate_bsp, build_corridors
+from placement import place_npcs, place_loot
+from csp import ac3, build_neighbor_graph
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -30,7 +33,12 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             payload = json.dumps(response, ensure_ascii=False).encode("utf-8")
             writer.write(len(payload).to_bytes(4, "big") + payload)
             await writer.drain()
-            log.info(f"Відповідь: rooms={len(response.get('rooms', []))}, corridors={len(response.get('corridors', []))}")
+            log.info(
+                f"Відповідь: rooms={len(response.get('rooms', []))}, "
+                f"corridors={len(response.get('corridors', []))}, "
+                f"npcs={len(response.get('npcs', []))}, "
+                f"loot={len(response.get('loot', []))}"
+            )
 
     except asyncio.IncompleteReadError:
         log.info(f"Godot відключився: {addr}")
@@ -58,22 +66,42 @@ async def process_request(request: dict) -> dict:
 
 async def handle_generate(req: GenerateRequest) -> dict:
     log.info(f"Генерація: seed={req.seed}, size={req.size}")
+    rng = random.Random(req.seed)
 
-    # 1. BSP — генеруємо кімнати
+    # 1. BSP — кімнати
     result = generate_bsp(size=req.size, seed=req.seed)
 
-    # 2. A* — будуємо коридори між парами кімнат
+    # 2. A* — коридори
     corridors = build_corridors(result.pairs, grid_w=req.size, grid_h=req.size)
 
-    # 3. Збираємо відповідь
+    # 3. AC-3 — призначаємо типи кімнат з урахуванням constraints
+    neighbor_graph = build_neighbor_graph(corridors)
+    room_types = ac3(result.rooms, neighbor_graph, rng)
+
+    # Застосовуємо типи до кімнат
+    for room in result.rooms:
+        room.type = room_types.get(room.id, "generic")
+
+    log.info(f"AC-3 типи: { {v: sum(1 for t in room_types.values() if t == v) for v in set(room_types.values())} }")
+
+    # 4. NPC placement
+    npcs = place_npcs(result.rooms, rng)
+
+    # 5. Loot placement
+    occupied = {(n.x, n.y) for n in npcs}
+    loot = place_loot(result.rooms, occupied, rng)
+
+    # 6. Збираємо відповідь
     response = DungeonResponse(
         seed  = req.seed,
         rooms = result.rooms,
+        npcs  = npcs,
+        loot  = loot,
     )
 
     data = response.to_dict()
     data["corridors"] = corridors
-    data["action"] = "generate"
+    data["action"]    = "generate"
     return data
 
 

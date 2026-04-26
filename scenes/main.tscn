@@ -158,3 +158,5 @@ tile_set = SubResource("TileSet_o6xl0")
 format = 2
 layer_0/name = "floor"
 layer_1/name = "wall"
+layer_2/name = "npc"
+layer_3/name = "loot"
