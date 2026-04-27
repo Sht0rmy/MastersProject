@@ -1,40 +1,29 @@
 """
 A* пошук шляху для коридорів між кімнатами.
-
-Алгоритм:
-1. Отримує дві точки (центри кімнат)
-2. Будує сітку прохідності (де є стіни/кімнати)
-3. Знаходить найкоротший шлях між точками
-4. Повертає список тайлів [[x,y], ...] для коридору
+Коридори уникають проходження впритул до стін кімнат.
 """
 
 from __future__ import annotations
 import heapq
 from dataclasses import dataclass, field
-
-
-# ─── Типи ─────────────────────────────────────────────────────────────────────
+from protocol import Room, Corridor
 
 Point = tuple[int, int]
 
 
-# ─── A* ───────────────────────────────────────────────────────────────────────
-
 @dataclass(order=True)
 class _Node:
     f: float
-    g: float         = field(compare=False)
-    pos: Point       = field(compare=False)
+    g: float = field(compare=False)
+    pos: Point = field(compare=False)
     parent: "_Node | None" = field(default=None, compare=False)
 
 
 def _heuristic(a: Point, b: Point) -> float:
-    """Manhattan відстань."""
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
 def _neighbors(pos: Point, grid_w: int, grid_h: int) -> list[Point]:
-    """4-напрямкові сусіди (без діагоналей — коридори прямі)."""
     x, y = pos
     result = []
     for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -44,24 +33,59 @@ def _neighbors(pos: Point, grid_w: int, grid_h: int) -> list[Point]:
     return result
 
 
+def _build_cost_map(
+    rooms: list[Room],
+    grid_w: int,
+    grid_h: int,
+) -> dict[Point, float]:
+    """
+    Будує карту вартості проходу.
+    - Підлога кімнати: непрохідна (999) — коридори не йдуть через кімнати
+    - Стіна кімнати: дуже дорого (50) — коридори уникають стін
+    - Сусід стіни кімнати (відступ 1): дорого (10) — коридори не йдуть впритул
+    - Відкритий простір: дешево (1)
+    """
+    cost: dict[Point, float] = {}
+    wall_cells: set[Point] = set()
+    floor_cells: set[Point] = set()
+
+    for room in rooms:
+        for ty in range(room.y, room.y + room.h):
+            for tx in range(room.x, room.x + room.w):
+                is_wall = (tx == room.x or tx == room.x + room.w - 1 or
+                           ty == room.y or ty == room.y + room.h - 1)
+                if is_wall:
+                    wall_cells.add((tx, ty))
+                    cost[(tx, ty)] = 50.0
+                else:
+                    floor_cells.add((tx, ty))
+                    cost[(tx, ty)] = 999.0  # не проходимо через підлогу кімнати
+
+    # Додаємо вартість для клітинок впритул до стін (відступ 1 тайл)
+    for wx, wy in wall_cells:
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                nb = (wx + dx, wy + dy)
+                if nb not in wall_cells and nb not in floor_cells:
+                    if cost.get(nb, 1.0) < 10.0:
+                        cost[nb] = 10.0
+
+    return cost
+
+
 def astar(
     start: Point,
     end: Point,
-    blocked: set[Point],
+    cost_map: dict[Point, float],
     grid_w: int,
     grid_h: int,
 ) -> list[Point]:
-    """
-    Знаходить шлях від start до end уникаючи blocked клітинок.
-    Повертає список точок включно зі start і end.
-    Якщо шлях не знайдено — повертає пряму лінію (fallback).
-    """
     if start == end:
         return [start]
 
     open_heap: list[_Node] = []
-    open_set:  dict[Point, _Node] = {}
-    closed:    set[Point] = set()
+    open_set: dict[Point, _Node] = {}
+    closed: set[Point] = set()
 
     start_node = _Node(f=_heuristic(start, end), g=0, pos=start)
     heapq.heappush(open_heap, start_node)
@@ -75,7 +99,6 @@ def astar(
         closed.add(current.pos)
 
         if current.pos == end:
-            # Відновлюємо шлях
             path = []
             node: _Node | None = current
             while node:
@@ -88,9 +111,12 @@ def astar(
             if nb in closed:
                 continue
 
-            # Коридори можуть проходити крізь стіни, але стіни дорожчі
-            cost = 1.0 if nb not in blocked else 5.0
-            g = current.g + cost
+            cell_cost = cost_map.get(nb, 1.0)
+            # Підлогу кімнат дозволяємо тільки для start/end точок
+            if cell_cost >= 999.0 and nb != end and nb != start:
+                continue
+
+            g = current.g + cell_cost
             f = g + _heuristic(nb, end)
 
             if nb in open_set and open_set[nb].g <= g:
@@ -100,61 +126,69 @@ def astar(
             heapq.heappush(open_heap, node)
             open_set[nb] = node
 
-    # Fallback: пряма L-подібна лінія якщо A* не знайшов шлях
     return _l_shaped(start, end)
 
 
 def _l_shaped(start: Point, end: Point) -> list[Point]:
-    """Простий L-подібний коридор як fallback."""
     path = []
     x, y = start
     ex, ey = end
-
     while x != ex:
         path.append((x, y))
         x += 1 if ex > x else -1
-
     while y != ey:
         path.append((x, y))
         y += 1 if ey > y else -1
-
     path.append(end)
     return path
 
 
-# ─── Публічний інтерфейс ──────────────────────────────────────────────────────
-
 def build_corridors(
-    pairs: list[tuple],          # list of (BSPNode, BSPNode)
+    pairs: list[tuple],
     grid_w: int,
     grid_h: int,
+    rooms: list[Room] | None = None,
 ) -> list[dict]:
-    """
-    Для кожної пари вузлів будує коридор між центрами їх кімнат.
-    Повертає список dict сумісних з Corridor.to_dict().
-    """
-    from protocol import Corridor
-
+    cost_map = _build_cost_map(rooms or [], grid_w, grid_h)
     corridors: list[dict] = []
-
-    # Збираємо всі тайли кімнат як "дорогі" для проходу
-    # (коридори краще йдуть по відкритому простору)
-    blocked: set[Point] = set()
 
     for left, right in pairs:
         if not left.room or not right.room:
             continue
 
-        start = left.room.center
-        end   = right.room.center
+        # Стартуємо з підлоги лівої кімнати, найближчої до правої
+        # Закінчуємо підлогою правої кімнати, найближчої до лівої
+        start = _closest_floor_to(right.room.center, left.room)
+        end   = _closest_floor_to(left.room.center, right.room)
 
-        path = astar(start, end, blocked, grid_w, grid_h)
+        path = astar(start, end, cost_map, grid_w, grid_h)
 
         corridor = Corridor(
-            from_room = left.room.id,
-            to_room   = right.room.id,
-            path      = [list(p) for p in path],
+            from_room=left.room.id,
+            to_room=right.room.id,
+            path=[list(p) for p in path],
         )
         corridors.append(corridor.to_dict())
 
     return corridors
+
+
+def _room_floor_cells(room: Room) -> list[Point]:
+    """Повертає всі внутрішні тайли кімнати (без стін)."""
+    cells = []
+    for ty in range(room.y + 1, room.y + room.h - 1):
+        for tx in range(room.x + 1, room.x + room.w - 1):
+            cells.append((tx, ty))
+    return cells
+
+
+def _closest_floor_to(point: Point, room: Room) -> Point:
+    """Знаходить найближчий внутрішній тайл кімнати до зовнішньої точки."""
+    best = room.center
+    best_dist = float("inf")
+    for cell in _room_floor_cells(room):
+        d = abs(cell[0] - point[0]) + abs(cell[1] - point[1])
+        if d < best_dist:
+            best_dist = d
+            best = cell
+    return best

@@ -72,7 +72,7 @@ async def handle_generate(req: GenerateRequest) -> dict:
     result = generate_bsp(size=req.size, seed=req.seed)
 
     # 2. A* — коридори
-    corridors = build_corridors(result.pairs, grid_w=req.size, grid_h=req.size)
+    corridors = build_corridors(result.pairs, grid_w=req.size, grid_h=req.size, rooms=result.rooms)
 
     # 3. AC-3 — призначаємо типи кімнат з урахуванням constraints
     neighbor_graph = build_neighbor_graph(corridors)
