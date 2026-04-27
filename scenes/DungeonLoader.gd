@@ -5,14 +5,14 @@ extends Node2D
 const TILE_SIZE := 16
 const LAYER_FLOOR := 0
 const LAYER_WALL  := 1
-const SOURCE_ID   := 0
+const SOURCE_ID   := 1
 
 # Тайли підлоги
 const TILE_WALL     := Vector2i(0, 0)
 const TILE_FLOOR    := Vector2i(1, 0)
 const TILE_CORRIDOR := Vector2i(1, 0)
 const TILE_ENTRANCE := Vector2i(2, 0)
-const TILE_TREASURE := Vector2i(3, 0)
+const TILE_TREASURE := Vector2i(1, 4)
 const TILE_COMBAT   := Vector2i(0, 1)
 
 # Тайли NPC (ряд 3 в тайлсеті — персонажі)

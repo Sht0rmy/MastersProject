@@ -1,14 +1,5 @@
 """
-AC-3 (Arc Consistency Algorithm 3).
-
-Алгоритм:
-1. Починаємо з початкових доменів для кожної кімнати
-2. Для кожної пари сусідніх кімнат (arc) перевіряємо сумісність
-3. Якщо значення в домені A не має жодного сумісного значення в домені B — видаляємо його
-4. Якщо домен змінився — додаємо всі суміжні арки в чергу
-5. Повторюємо поки черга не порожня
-
-Результат: звужені домени → вибираємо тип для кожної кімнати.
+AC-3 з підтримкою boss і merchant ізоляції в тупиках.
 """
 
 from __future__ import annotations
@@ -19,70 +10,59 @@ from protocol import Room
 from csp.constraints import (
     Constraint,
     GLOBAL_LIMITS,
+    DEAD_END_ONLY_TYPES,
+    BOSS_MAX_NEIGHBORS,
     initial_domain,
 )
 
-
-# ─── AC-3 ─────────────────────────────────────────────────────────────────────
 
 def ac3(
     rooms: list[Room],
     neighbors: dict[int, list[int]],
     rng: random.Random,
 ) -> dict[int, str]:
-    """
-    Запускає AC-3 і повертає призначення типів {room_id: type}.
-
-    Args:
-        rooms:     список кімнат
-        neighbors: граф суміжності {room_id: [room_id, ...]}
-        rng:       генератор випадкових чисел
-    """
-    # 1. Ініціалізуємо домени
+    # 1. Домени
     domains: dict[int, list[str]] = {
         room.id: initial_domain(room.id, len(rooms))
         for room in rooms
     }
 
-    # 2. Будуємо список constraints (арок)
+    # 2. Boss і merchant — тільки тупики
+    for room in rooms:
+        nbr_count = len(neighbors.get(room.id, []))
+        if nbr_count > BOSS_MAX_NEIGHBORS:
+            for dead_end_type in DEAD_END_ONLY_TYPES:
+                if dead_end_type in domains[room.id]:
+                    domains[room.id].remove(dead_end_type)
+
+    # 3. Constraints
     constraints: list[Constraint] = []
     for room_id, nbrs in neighbors.items():
         for nbr_id in nbrs:
-            if room_id < nbr_id:  # уникаємо дублікатів
+            if room_id < nbr_id:
                 constraints.append(Constraint(room_id, nbr_id))
 
-    # 3. AC-3
+    # 4. AC-3
     queue: deque[Constraint] = deque(constraints)
-    # Також додаємо зворотні арки
     queue.extend(Constraint(c.room_b, c.room_a) for c in constraints)
 
     while queue:
         arc = queue.popleft()
         if _revise(domains, arc):
             if not domains[arc.room_a]:
-                # Домен порожній — відновлюємо до generic
                 domains[arc.room_a] = ["generic"]
-            # Додаємо сусідів в чергу
             for nbr in neighbors.get(arc.room_a, []):
                 if nbr != arc.room_b:
                     queue.append(Constraint(nbr, arc.room_a))
 
-    # 4. Вибираємо тип з домену для кожної кімнати
-    assignment = _assign(domains, rooms, rng)
-    return assignment
+    # 5. Призначення
+    return _assign(domains, rooms, neighbors, rng)
 
 
 def _revise(domains: dict[int, list[str]], arc: Constraint) -> bool:
-    """
-    Видаляє з домену arc.room_a значення які не мають
-    жодного сумісного значення в домені arc.room_b.
-    Повертає True якщо домен змінився.
-    """
     revised = False
     to_remove = []
-
     for type_a in domains[arc.room_a]:
-        # Чи є хоч одне сумісне значення в домені B?
         has_support = any(
             arc.is_satisfied(type_a, type_b)
             for type_b in domains[arc.room_b]
@@ -90,81 +70,88 @@ def _revise(domains: dict[int, list[str]], arc: Constraint) -> bool:
         if not has_support:
             to_remove.append(type_a)
             revised = True
-
     for t in to_remove:
         domains[arc.room_a].remove(t)
-
     return revised
 
 
 def _assign(
     domains: dict[int, list[str]],
     rooms: list[Room],
+    neighbors: dict[int, list[int]],
     rng: random.Random,
 ) -> dict[int, str]:
-    """
-    Вибирає тип для кожної кімнати з домену
-    з урахуванням глобальних лімітів.
-    """
     assignment: dict[int, str] = {}
     type_counts: dict[str, int] = {t: 0 for t in GLOBAL_LIMITS}
 
-    # Спочатку призначаємо кімнати з одним значенням в домені (entrance)
+    # Кімнати з одним значенням (entrance)
     for room in rooms:
-        domain = domains[room.id]
-        if len(domain) == 1:
-            chosen = domain[0]
+        if len(domains[room.id]) == 1:
+            chosen = domains[room.id][0]
             assignment[room.id] = chosen
             type_counts[chosen] = type_counts.get(chosen, 0) + 1
 
-    # Потім решту — з урахуванням лімітів
+    # Тупики — кандидати для boss і merchant
+    dead_ends = [
+        room.id for room in rooms
+        if len(neighbors.get(room.id, [])) <= BOSS_MAX_NEIGHBORS
+        and room.id not in assignment
+    ]
+    rng.shuffle(dead_ends)
+
+    # Призначаємо boss і merchant різним тупикам
+    for dead_end_type in ["boss", "merchant"]:
+        max_c = GLOBAL_LIMITS.get(dead_end_type, (0, 0))[1]
+        if max_c < 1:
+            continue
+        for room_id in dead_ends:
+            if room_id in assignment:
+                continue
+            if dead_end_type in domains[room_id]:
+                assignment[room_id] = dead_end_type
+                type_counts[dead_end_type] = 1
+                break
+
+    # Решта кімнат
     for room in rooms:
         if room.id in assignment:
             continue
 
-        domain = list(domains[room.id])
+        domain = [
+            t for t in domains[room.id]
+            if t not in DEAD_END_ONLY_TYPES
+        ]
         rng.shuffle(domain)
 
         chosen = "generic"
         for candidate in domain:
-            min_c, max_c = GLOBAL_LIMITS.get(candidate, (0, 999))
-            current = type_counts.get(candidate, 0)
-
-            # Перевіряємо чи не перевищено максимум
-            if current < max_c:
+            _, max_c = GLOBAL_LIMITS.get(candidate, (0, 999))
+            if type_counts.get(candidate, 0) < max_c:
                 chosen = candidate
                 break
 
         assignment[room.id] = chosen
         type_counts[chosen] = type_counts.get(chosen, 0) + 1
 
-    # Перевіряємо мінімуми — якщо якийсь тип не досягнув мінімуму,
-    # перепризначаємо generic кімнати
+    # Мінімуми
     for room_type, (min_c, _) in GLOBAL_LIMITS.items():
-        current = type_counts.get(room_type, 0)
-        if current < min_c:
-            # Знаходимо generic кімнати і перепризначаємо
+        if type_counts.get(room_type, 0) < min_c:
             for room in rooms:
                 if type_counts.get(room_type, 0) >= min_c:
                     break
                 if assignment.get(room.id) == "generic":
                     assignment[room.id] = room_type
-                    type_counts["generic"] = type_counts.get("generic", 1) - 1
+                    type_counts["generic"] = max(0, type_counts.get("generic", 1) - 1)
                     type_counts[room_type] = type_counts.get(room_type, 0) + 1
 
     return assignment
 
 
-# ─── Граф суміжності з коридорів ──────────────────────────────────────────────
-
 def build_neighbor_graph(corridors: list[dict]) -> dict[int, list[int]]:
-    """Будує граф суміжності кімнат з списку коридорів."""
     graph: dict[int, list[int]] = {}
-
     for corridor in corridors:
         a = corridor["from"]
         b = corridor["to"]
         graph.setdefault(a, []).append(b)
         graph.setdefault(b, []).append(a)
-
     return graph

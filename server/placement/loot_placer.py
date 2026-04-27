@@ -1,20 +1,13 @@
 """
 Loot Placer — розміщує предмети в кімнатах.
-
-Правила:
-- entrance:  нічого або стартовий предмет
-- treasure:  багато луту (gold, sword, potion)
-- combat:    невеликий лут після ворогів
-- generic:   рідкісний лут
-- boss:      найкращий лут
+merchant і boss кімнати: без луту на підлозі.
 """
 
 from __future__ import annotations
 import random
 from protocol import LootItem, Room
 
-# ─── Таблиці луту ─────────────────────────────────────────────────────────────
-
+# merchant і boss — без луту (лут видається через взаємодію)
 ROOM_LOOT_TABLE: dict[str, list[dict]] = {
     "entrance": [
         {"kind": "potion", "value": 1, "count": (0, 1)},
@@ -29,17 +22,12 @@ ROOM_LOOT_TABLE: dict[str, list[dict]] = {
         {"kind": "potion", "value": 1, "count": (0, 1)},
     ],
     "generic": [
-        {"kind": "gold",   "value": 1, "count": (0, 1)},
+        {"kind": "gold", "value": 1, "count": (0, 1)},
     ],
-    "boss": [
-        {"kind": "gold",   "value": 20, "count": (1, 1)},
-        {"kind": "sword",  "value": 10, "count": (1, 1)},
-        {"kind": "key",    "value": 1,  "count": (1, 1)},
-    ],
+    "merchant": [],   # ← порожньо — без луту
+    "boss":     [],   # ← порожньо — лут через взаємодію з boss
 }
 
-
-# ─── Утиліти ──────────────────────────────────────────────────────────────────
 
 def _free_positions(room: Room, occupied: set[tuple[int, int]]) -> list[tuple[int, int]]:
     positions = []
@@ -50,18 +38,11 @@ def _free_positions(room: Room, occupied: set[tuple[int, int]]) -> list[tuple[in
     return positions
 
 
-# ─── Публічний інтерфейс ──────────────────────────────────────────────────────
-
 def place_loot(
     rooms: list[Room],
     occupied: set[tuple[int, int]],
     rng: random.Random,
 ) -> list[LootItem]:
-    """
-    Розміщує лут в кімнатах.
-    occupied — позиції вже зайняті NPC.
-    Повертає список LootItem з координатами.
-    """
     loot: list[LootItem] = []
     loot_id = 0
 
@@ -84,20 +65,14 @@ def place_loot(
             for _ in range(count):
                 if pos_idx >= len(free):
                     break
-
                 x, y = free[pos_idx]
                 pos_idx += 1
                 occupied.add((x, y))
-
-                item = LootItem(
-                    id      = loot_id,
-                    room_id = room.id,
-                    x       = x,
-                    y       = y,
-                    kind    = entry["kind"],
-                    value   = entry["value"],
-                )
-                loot.append(item)
+                loot.append(LootItem(
+                    id=loot_id, room_id=room.id,
+                    x=x, y=y,
+                    kind=entry["kind"], value=entry["value"],
+                ))
                 loot_id += 1
 
     return loot
