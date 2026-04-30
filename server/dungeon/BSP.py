@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 
 from protocol import Room
 
-MIN_NODE_SIZE  = 7
-MIN_ROOM_SIZE  = 4
+MIN_NODE_SIZE  = 5 #instead of 7
+MIN_ROOM_SIZE  = 3 #instead of 4
 ROOM_PADDING   = 1
 
 # Максимальне співвідношення сторін кімнати (w/h або h/w)
